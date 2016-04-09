@@ -1,4 +1,4 @@
-#define F_CPU 16000000UL // 16MHz
+#define F_CPU 4000000UL // 16MHz
 
 //#include <inttypes.h>
 #include <avr/io.h>
@@ -42,18 +42,6 @@
 #define DISP_DATA_high() PORTD |= 1<<HC595_DATA;
 #define DISP_DATA_low() PORTD &= ~(1<<HC595_DATA);
 
-/*struct DISTANCE {
-	uint8_t higher_two;
-	uint16_t high_four;
-	uint16_t low_four;
-};
-
-struct SPEED {
-	uint8_t high;
-	uint8_t low;
-};
-*/
-
 void init(void);
 void display_bits(uint32_t disp);
 void display_digit(uint16_t digit, uint8_t dot);
@@ -64,6 +52,7 @@ void timer1_init(void);
 void timer1_start(void);
 void timer1_stop(void);
 void clear_button_flags(void);
+void set_time(void);
 uint16_t secs_to_clock(uint16_t secs);
 
 
@@ -84,32 +73,33 @@ uint8_t symbol[] = {
 	0b00000000		// NONE
 };
 
-uint64_t text[7] = {
-	/*0b100111001111110010011110100011100000000000000000, // DISP_COEF
+/*uint64_t text[7] = {
+	0b100111001111110010011110100011100000000000000000, // DISP_COEF
 	0b101101101100111010011110011110100001000001101110, // DISP_SPEd_H
 	0b101101101100111010011110011110100001000000011100, // DISP_SPEd_L
 	0b101101101100111000010000101101100110000010111100, // DISP_SP_SIG
 	0b110011001110010011111100011110101001111000000000, // DISP_MOdE
 	0b011110101001111010001110000111000001111000000000,	// DISP_dEFLt
 	0b000100000001000001111010001110100010101010011110	// DISP_donE
-	*/
-};
+};*/
 
 /*uint16_t EEMEM e_speed_max = 5100;
 uint16_t EEMEM e_beeper_speed_interval = 500;*/
 
-uint16_t EEMEM e_time;
+uint16_t EEMEM e_time = 2*60+30;
 
 struct FLAG {
 	unsigned timeout : 1;
 	unsigned update : 1;
 	unsigned but_start : 1;
 	unsigned but_pause : 1;
+	unsigned pause : 1;
 } flag;
 
 
 
 uint16_t time;
+uint8_t timer0_counter;
 
 
 int main(void)
@@ -117,7 +107,7 @@ int main(void)
 	init();
 
 	// READ EEPROM
-	time = eeprom_read_word(&e_time);
+	set_time();
 
 	// UPDATE DISPLAY
 	display_digit(secs_to_clock(time), 2);
@@ -132,6 +122,9 @@ int main(void)
 			{
 				flag.timeout = 0;
 				ULEDS_PORT &= ~(1<<ULEDS_P); // disable uleds
+
+				_delay_ms(1500);
+				display_digit(secs_to_clock(time), 2);
 			}
 		}
 
@@ -140,12 +133,34 @@ int main(void)
 			clear_button_flags();
 			ULEDS_PORT |= 1<<ULEDS_P; // enable uleds
 			timer1_start();
+
+			if (flag.pause) 
+			{
+				flag.pause = 0;
+				LED_PORT &= ~(1<<LED_P);
+			}
 		}
 
 		if (flag.but_pause)
 		{
 			clear_button_flags();
-			timer1_stop();
+			if (flag.pause)
+			{
+				flag.pause = 0;
+				LED_PORT &= ~(1<<LED_P);
+				set_time();
+				display_digit(secs_to_clock(time), 2);
+			}
+			else
+			{
+				flag.pause = 1;
+				if (~(flag.pause))
+				{
+					timer1_stop();
+					LED_PORT |= (1<<LED_P);
+					ULEDS_PORT &= ~(1<<ULEDS_P); // disable uleds
+				}
+			}
 		}
 
 		// DELAY
@@ -158,14 +173,19 @@ int main(void)
 
 void clear_button_flags(void)
 {
-	//flag.but_mode = 0;
+	flag.but_start = 0;
+	flag.but_pause = 0;
 }
 
 
 ISR(TIMER0_OVF_vect)
 {
-	timer0_stop();
-	GIMSK = 1<<PCIE; // Enable Pin Change Interrupts
+	timer0_counter--;
+	if (timer0_counter == 0)
+	{
+		timer0_stop();
+		GIMSK = 1<<PCIE; // Enable Pin Change Interrupts
+	}
 }
 
 ISR(TIMER1_COMPA_vect)
@@ -173,25 +193,25 @@ ISR(TIMER1_COMPA_vect)
 	time--;
 	flag.update = 1;
 
-	if (~(time)) flag.timeout = 1;
+	if (time == 0) flag.timeout = 1;
 }
 
 ISR(PCINT_vect)
 {
-	uint8_t cur_buttons = BUT_PIN;
 	GIMSK = 0<<PCIE; // Disable Pin Change Interrupts
+	timer0_start();
+	uint8_t cur_buttons = BUT_PIN;
 	if ((cur_buttons & (1<<BUT_START | 1<<BUT_PAUSE)) != (1<<BUT_START | 1<<BUT_PAUSE))
 	{
-		if (cur_buttons & 1<<BUT_START)
+
+		if ((cur_buttons & 1<<BUT_START) != (1<<BUT_START))
 		{
 			flag.but_start = 1;
 		}
-		if (cur_buttons & 1<<BUT_PAUSE)
+		if ((cur_buttons & 1<<BUT_PAUSE) != (1<<BUT_PAUSE))
 		{
 			flag.but_pause = 1;
 		}
-
-		timer0_start();
 	}
 }
 
@@ -226,7 +246,7 @@ void init(void)
 	ACSR = 1<<ACD;
 
 	// PIN CHANGE INTERRUPTS INIT
-	PCMSK = 0b111; // MASK
+	PCMSK = 1<<BUT_START | 1<<BUT_PAUSE; // MASK
 
 	//mode_set(mode_general);
 
@@ -286,6 +306,7 @@ void timer0_init(void)
 }
 void timer0_start(void)
 {
+	timer0_counter = 4;
 	TCCR0B |= (1<<CS02 | 0<<CS01 | 1<<CS00); // prescaler = 1024
 }
 void timer0_stop(void)
@@ -319,4 +340,10 @@ uint16_t secs_to_clock(uint16_t secs)
 	uint8_t mins = secs / 60;
 	secs %= 60;
 	return mins * 100 + secs;
+}
+
+void set_time(void)
+{
+	time = eeprom_read_word(&e_time);
+	if ((time>600) || (time<60)) time = 213; // "333" on disp - eeprom info error
 }
