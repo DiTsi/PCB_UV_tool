@@ -123,7 +123,17 @@ int main(void)
 				flag.timeout = 0;
 				ULEDS_PORT &= ~(1<<ULEDS_P); // disable uleds
 
+				SPEAKER_PORT |= 1<<SPEAKER_P;
+				_delay_ms(40);
+				SPEAKER_PORT &= ~(1<<SPEAKER_P);
+				_delay_ms(100);
+				SPEAKER_PORT |= 1<<SPEAKER_P;
+				_delay_ms(40);
+				SPEAKER_PORT &= ~(1<<SPEAKER_P);
+
+
 				_delay_ms(1500);
+				set_time();
 				display_digit(secs_to_clock(time), 2);
 			}
 		}
@@ -149,6 +159,7 @@ int main(void)
 				flag.pause = 0;
 				LED_PORT &= ~(1<<LED_P);
 				set_time();
+				TCNT1 = 0;
 				display_digit(secs_to_clock(time), 2);
 			}
 			else
@@ -306,7 +317,7 @@ void timer0_init(void)
 }
 void timer0_start(void)
 {
-	timer0_counter = 4;
+	timer0_counter = 2;
 	TCCR0B |= (1<<CS02 | 0<<CS01 | 1<<CS00); // prescaler = 1024
 }
 void timer0_stop(void)
