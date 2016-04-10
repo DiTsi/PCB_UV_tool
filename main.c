@@ -121,6 +121,7 @@ int main(void)
 			if (flag.timeout)
 			{
 				flag.timeout = 0;
+				timer1_stop();
 				ULEDS_PORT &= ~(1<<ULEDS_P); // disable uleds
 
 				SPEAKER_PORT |= 1<<SPEAKER_P;
