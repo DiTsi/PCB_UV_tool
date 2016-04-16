@@ -19,6 +19,7 @@
 #define BUT_PIN PINB
 #define BUT_START PB1
 #define BUT_PAUSE PB2
+#define BUT_CONF PB0
 
 // define uleds
 #define ULEDS_PORT PORTB
@@ -73,26 +74,29 @@ uint8_t symbol[] = {
 	0b00000000		// NONE
 };
 
-/*uint64_t text[7] = {
-	0b100111001111110010011110100011100000000000000000, // DISP_COEF
-	0b101101101100111010011110011110100001000001101110, // DISP_SPEd_H
-	0b101101101100111010011110011110100001000000011100, // DISP_SPEd_L
-	0b101101101100111000010000101101100110000010111100, // DISP_SP_SIG
-	0b110011001110010011111100011110101001111000000000, // DISP_MOdE
-	0b011110101001111010001110000111000001111000000000,	// DISP_dEFLt
-	0b000100000001000001111010001110100010101010011110	// DISP_donE
-};*/
+uint32_t text[1] = {
+	//0b100111001111110010011110100011100000000000000000, // DISP_COEF
+	//0b101101101100111010011110011110100001000001101110, // DISP_SPEd_H
+	//0b101101101100111010011110011110100001000000011100, // DISP_SPEd_L
+	//0b101101101100111000010000101101100110000010111100, // DISP_SP_SIG
+	//0b110011001110010011111100011110101001111000000000, // DISP_MOdE
+	//0b011110101001111010001110000111000001111000000000,	// DISP_dEFLt
+	0b101101101110111001111100	// DISP_SAV
+};
 
 /*uint16_t EEMEM e_speed_max = 5100;
 uint16_t EEMEM e_beeper_speed_interval = 500;*/
 
-uint16_t EEMEM e_time = 2*60+30;
+uint16_t EEMEM e_time;
 
 struct FLAG {
 	unsigned timeout : 1;
+	unsigned work : 1;
+	unsigned conf : 1;
 	unsigned update : 1;
 	unsigned but_start : 1;
 	unsigned but_pause : 1;
+	unsigned but_conf : 1;
 	unsigned pause : 1;
 } flag;
 
@@ -110,7 +114,7 @@ int main(void)
 	set_time();
 
 	// UPDATE DISPLAY
-	display_digit(secs_to_clock(time), 2);
+	display_bits(0b1);
 
 	while (1)
 	{
@@ -135,42 +139,90 @@ int main(void)
 
 				_delay_ms(1500);
 				set_time();
-				display_digit(secs_to_clock(time), 2);
+				display_bits(0b1);
+
+				flag.work = 0;
+			}
+		}
+
+
+		if (flag.work ^ 0b1)
+		{
+			if (flag.but_conf)
+			{
+				clear_button_flags();
+
+				if (flag.conf)
+				{
+					eeprom_update_word(&e_time, time);
+					set_time();
+					display_bits(text[0]);
+					_delay_ms(1000);
+					display_bits(0b1);
+					flag.conf = 0;
+				}
+				else
+				{
+					flag.conf = 1;
+					display_digit(secs_to_clock(time), 2);
+				}
 			}
 		}
 
 		if (flag.but_start)
 		{
 			clear_button_flags();
-			ULEDS_PORT |= 1<<ULEDS_P; // enable uleds
-			timer1_start();
-
-			if (flag.pause) 
+			if (flag.conf)
 			{
-				flag.pause = 0;
-				LED_PORT &= ~(1<<LED_P);
+				time -= 5;
+				if (time < 30) time = 30;
+				display_digit(secs_to_clock(time), 2);
+			}
+			else
+			{
+				display_digit(secs_to_clock(time), 2);
+				flag.work = 1;
+				ULEDS_PORT |= 1<<ULEDS_P; // enable uleds
+				timer1_start();
+	
+				if (flag.pause) 
+				{
+					flag.pause = 0;
+					LED_PORT &= ~(1<<LED_P);
+				}
 			}
 		}
 
 		if (flag.but_pause)
 		{
 			clear_button_flags();
-			if (flag.pause)
+			if (flag.conf)
 			{
-				flag.pause = 0;
-				LED_PORT &= ~(1<<LED_P);
-				set_time();
-				TCNT1 = 0;
+				time += 5;
+				if (time > 600) time = 600;
 				display_digit(secs_to_clock(time), 2);
 			}
 			else
 			{
-				flag.pause = 1;
-				if (~(flag.pause))
+				if (flag.work)
 				{
-					timer1_stop();
-					LED_PORT |= (1<<LED_P);
-					ULEDS_PORT &= ~(1<<ULEDS_P); // disable uleds
+					if (flag.pause)
+					{
+						flag.pause = 0;
+						LED_PORT &= ~(1<<LED_P);
+						set_time();
+						TCNT1 = 0;
+						display_bits(0b1);
+		
+						flag.work = 0;
+					}
+					else
+					{
+						flag.pause = 1;
+						timer1_stop();
+						LED_PORT |= (1<<LED_P);
+						ULEDS_PORT &= ~(1<<ULEDS_P); // disable uleds
+					}
 				}
 			}
 		}
@@ -187,6 +239,7 @@ void clear_button_flags(void)
 {
 	flag.but_start = 0;
 	flag.but_pause = 0;
+	flag.but_conf = 0;
 }
 
 
@@ -213,9 +266,13 @@ ISR(PCINT_vect)
 	GIMSK = 0<<PCIE; // Disable Pin Change Interrupts
 	timer0_start();
 	uint8_t cur_buttons = BUT_PIN;
-	if ((cur_buttons & (1<<BUT_START | 1<<BUT_PAUSE)) != (1<<BUT_START | 1<<BUT_PAUSE))
+	if ((cur_buttons & (1<<BUT_START | 1<<BUT_PAUSE | 1<<BUT_CONF)) != (1<<BUT_START | 1<<BUT_PAUSE | 1<<BUT_CONF))
 	{
 
+		if ((cur_buttons & 1<<BUT_CONF) != (1<<BUT_CONF))
+		{
+			flag.but_conf = 1;
+		}
 		if ((cur_buttons & 1<<BUT_START) != (1<<BUT_START))
 		{
 			flag.but_start = 1;
@@ -238,19 +295,6 @@ void init(void)
 	timer0_init();
 	timer1_init();
 
-	// TIMER for LEDS and buttons interrupts delay
-	//timer2_init();
-	//timer2_start();
-
-	// READ EEPROM
-	/*
-	speed_max = eeprom_read_word(&e_speed_max);
-	speed_min = eeprom_read_word(&e_speed_min);
-	beeper_speed_interval = eeprom_read_word(&e_beeper_speed_interval);
-	koef5w = eeprom_read_word(&e_koef5w);
-	mode_general = eeprom_read_byte(&e_mode);
-	*/
-
 	// external interrupts
 	GIMSK = 1<<PCIE; // enable external interrupts
 
@@ -258,7 +302,7 @@ void init(void)
 	ACSR = 1<<ACD;
 
 	// PIN CHANGE INTERRUPTS INIT
-	PCMSK = 1<<BUT_START | 1<<BUT_PAUSE; // MASK
+	PCMSK = 1<<BUT_START | 1<<BUT_PAUSE | 1<<BUT_CONF; // MASK
 
 	//mode_set(mode_general);
 
@@ -357,5 +401,5 @@ uint16_t secs_to_clock(uint16_t secs)
 void set_time(void)
 {
 	time = eeprom_read_word(&e_time);
-	if ((time>600) || (time<60)) time = 213; // "333" on disp - eeprom info error
+	if ((time>600) || (time<30)) time = 71; // "111" on disp - eeprom info error
 }
