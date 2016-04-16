@@ -43,6 +43,11 @@
 #define DISP_DATA_high() PORTD |= 1<<HC595_DATA;
 #define DISP_DATA_low() PORTD &= ~(1<<HC595_DATA);
 
+// define states
+#define STATE_IDLE 0
+#define STATE_WORK 1
+#define STATE_CONF 2
+
 void init(void);
 void display_bits(uint32_t disp);
 void display_digit(uint16_t digit, uint8_t dot);
@@ -91,8 +96,7 @@ uint16_t EEMEM e_time;
 
 struct FLAG {
 	unsigned timeout : 1;
-	unsigned work : 1;
-	unsigned conf : 1;
+	unsigned state : 2;
 	unsigned update : 1;
 	unsigned but_start : 1;
 	unsigned but_pause : 1;
@@ -141,88 +145,82 @@ int main(void)
 				set_time();
 				display_bits(0b1);
 
-				flag.work = 0;
+				flag.state = STATE_IDLE;
 			}
 		}
 
 
-		if (flag.work ^ 0b1)
+		if ((flag.state != STATE_WORK) && (flag.but_conf))
 		{
-			if (flag.but_conf)
+			clear_button_flags();
+			if (flag.state == STATE_CONF)
 			{
-				clear_button_flags();
-
-				if (flag.conf)
-				{
-					eeprom_update_word(&e_time, time);
-					set_time();
-					display_bits(text[0]);
-					_delay_ms(1000);
-					display_bits(0b1);
-					flag.conf = 0;
-				}
-				else
-				{
-					flag.conf = 1;
-					display_digit(secs_to_clock(time), 2);
-				}
+				eeprom_update_word(&e_time, time);
+				set_time();
+				display_bits(text[0]);
+				_delay_ms(1000);
+				display_bits(0b1);
+				flag.state = STATE_IDLE;
+			}
+			else
+			{
+				flag.state = STATE_CONF;
+				display_digit(secs_to_clock(time), 2);
 			}
 		}
 
 		if (flag.but_start)
 		{
 			clear_button_flags();
-			if (flag.conf)
+			if (flag.state == STATE_CONF)
 			{
 				time -= 5;
 				if (time < 30) time = 30;
 				display_digit(secs_to_clock(time), 2);
 			}
-			else
+			if (flag.state == STATE_IDLE)
 			{
 				display_digit(secs_to_clock(time), 2);
-				flag.work = 1;
+				flag.state = STATE_WORK;
 				ULEDS_PORT |= 1<<ULEDS_P; // enable uleds
 				timer1_start();
-	
-				if (flag.pause) 
-				{
-					flag.pause = 0;
-					LED_PORT &= ~(1<<LED_P);
-				}
+			}
+			if (flag.state == STATE_WORK)
+			{
+				ULEDS_PORT |= 1<<ULEDS_P; // enable uleds
+				timer1_start();
+				LED_PORT &= ~(1<<LED_P);
+				flag.pause = 0;
 			}
 		}
 
-		if (flag.but_pause)
+		if ((flag.state != STATE_IDLE) && (flag.but_pause))
 		{
 			clear_button_flags();
-			if (flag.conf)
+			if (flag.state == STATE_CONF)
 			{
 				time += 5;
 				if (time > 600) time = 600;
 				display_digit(secs_to_clock(time), 2);
 			}
-			else
+			if (flag.state == STATE_WORK)
 			{
-				if (flag.work)
+				if (flag.pause)
 				{
-					if (flag.pause)
-					{
-						flag.pause = 0;
-						LED_PORT &= ~(1<<LED_P);
-						set_time();
-						TCNT1 = 0;
-						display_bits(0b1);
-		
-						flag.work = 0;
-					}
-					else
-					{
-						flag.pause = 1;
-						timer1_stop();
-						LED_PORT |= (1<<LED_P);
-						ULEDS_PORT &= ~(1<<ULEDS_P); // disable uleds
-					}
+					flag.pause = 0;
+					LED_PORT &= ~(1<<LED_P);
+					set_time();
+					TCNT1 = 0;
+					display_bits(0b1);
+	
+					flag.state = STATE_IDLE;
+				}
+				else
+				{
+					flag.pause = 1;
+					timer1_stop();
+					LED_PORT |= (1<<LED_P);
+					ULEDS_PORT &= ~(1<<ULEDS_P); // disable uleds
 				}
 			}
 		}
@@ -308,6 +306,8 @@ void init(void)
 
 	// ENABLE GLOBAL INTERRUPTS
 	sei();
+
+	flag.state = STATE_IDLE;
 }
 
 void display_bits(uint32_t disp)
