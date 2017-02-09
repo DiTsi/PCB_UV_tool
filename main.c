@@ -1,11 +1,9 @@
 #define F_CPU 4000000UL // 16MHz
 
-//#include <inttypes.h>
 #include <avr/io.h>
 #include <avr/interrupt.h>
 #include <util/delay.h>
 #include <avr/eeprom.h>
-//#include <math.h>
 
 // define speaker
 #define SPEAKER_P PB3
@@ -92,7 +90,7 @@ uint32_t text[1] = {
 /*uint16_t EEMEM e_speed_max = 5100;
 uint16_t EEMEM e_beeper_speed_interval = 500;*/
 
-uint16_t EEMEM e_time;
+uint16_t EEMEM e_time = 150;
 
 struct FLAG {
 	unsigned timeout : 1;
@@ -122,6 +120,15 @@ int main(void)
 
 	while (1)
 	{
+		// dimming
+		if ((PINB & (1<<ULEDS_P)) == (1<<ULEDS_P))
+		{
+			ULEDS_PORT &= ~(1<<ULEDS_P); // disable uleds
+			_delay_us(1500);
+			ULEDS_PORT |= (1<<ULEDS_P); // enable uleds
+			_delay_us(100);
+		}
+
 		if (flag.update)
 		{
 			flag.update = 0;
