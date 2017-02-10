@@ -46,6 +46,9 @@
 #define STATE_WORK 1
 #define STATE_CONF 2
 
+#define OPTION_TIME 1
+#define OPTION_BRIGHTNESS 2
+
 void init(void);
 void display_bits(uint32_t disp);
 void display_digit(uint16_t digit, uint8_t dot);
@@ -57,6 +60,7 @@ void timer1_start(void);
 void timer1_stop(void);
 void clear_button_flags(void);
 void set_time(void);
+void set_brightness(void);
 uint16_t secs_to_clock(uint16_t secs);
 void pcint_enable(void);
 
@@ -92,7 +96,7 @@ uint32_t text[1] = {
 uint16_t EEMEM e_beeper_speed_interval = 500;*/
 
 uint16_t EEMEM e_time = 150;
-uint8_t EEMEM e_brightness = 100;
+uint8_t EEMEM e_brightness = 25;
 
 struct FLAG {
 	unsigned timeout : 1;
@@ -107,7 +111,9 @@ struct FLAG {
 
 
 uint16_t time;
+uint8_t brightness;
 uint8_t timer0_counter;
+uint8_t option = OPTION_TIME;
 
 
 int main(void)
@@ -116,6 +122,7 @@ int main(void)
 
 	// READ EEPROM
 	set_time();
+	set_brightness();
 
 	// UPDATE DISPLAY
 	display_bits(0b1);
@@ -155,12 +162,33 @@ int main(void)
 			clear_button_flags();
 			if (flag.state == STATE_CONF)
 			{
-				eeprom_update_word(&e_time, time);
-				set_time();
-				display_bits(text[0]);
-				_delay_ms(1000);
-				display_bits(0b1);
-				flag.state = STATE_IDLE;
+				if (option == OPTION_BRIGHTNESS)
+				{
+					ULEDS_PORT &= ~(1<<ULEDS_P); // disable uleds
+					timer0_stop();
+					eeprom_update_byte(&e_brightness, brightness);
+					set_brightness();
+
+					display_bits(text[0]);
+					_delay_ms(700);
+					display_bits(0b1);
+
+					option = OPTION_TIME;
+					flag.state = STATE_IDLE;
+				}
+				else if (option == OPTION_TIME)
+				{
+					eeprom_update_word(&e_time, time);
+					set_time();
+					display_bits(text[0]);
+					_delay_ms(700);
+					display_bits(0b1);
+					option = OPTION_BRIGHTNESS;
+					display_digit(brightness, 255);
+
+					timer0_start();
+					ULEDS_PORT |= 1<<ULEDS_P; // enable uleds
+				}
 			}
 			else
 			{
@@ -176,9 +204,20 @@ int main(void)
 			clear_button_flags();
 			if (flag.state == STATE_CONF)
 			{
-				time -= 5;
-				if (time < 30) time = 30;
-				display_digit(secs_to_clock(time), 2);
+				if (option == OPTION_TIME)
+				{
+					time -= 5;
+					if (time < 30) time = 30;
+					display_digit(secs_to_clock(time), 2);
+				}
+				if (option == OPTION_BRIGHTNESS)
+				{
+					brightness -= 5;
+					if (brightness < 10) brightness = 10;
+					OCR0A = brightness;
+					display_digit(brightness, 255);
+				
+				}
 			}
 			if (flag.state == STATE_IDLE)
 			{
@@ -207,9 +246,19 @@ int main(void)
 			clear_button_flags();
 			if (flag.state == STATE_CONF)
 			{
-				time += 5;
-				if (time > 600) time = 600;
-				display_digit(secs_to_clock(time), 2);
+				if (option == OPTION_TIME)
+				{
+					time += 5;
+					if (time > 600) time = 600;
+					display_digit(secs_to_clock(time), 2);
+				}
+				if (option == OPTION_BRIGHTNESS)
+				{
+					brightness += 5;
+					if (brightness > 250) brightness = 250;
+					OCR0A = brightness;
+					display_digit(brightness, 255);
+				}
 			}
 			if (flag.state == STATE_WORK)
 			{
@@ -396,7 +445,6 @@ void timer0_stop(void)
 	TCCR0B &= ~(1<<CS02 | 1<<CS01 | 1<<CS00);
 }
 
-
 // TIMER1
 void timer1_init(void)
 {
@@ -429,6 +477,14 @@ void set_time(void)
 	time = eeprom_read_word(&e_time);
 	if ((time>600) || (time<30)) time = 71; // "111" on disp - eeprom info error
 }
+
+void set_brightness(void)
+{
+	brightness = eeprom_read_byte(&e_brightness);
+	if ((brightness>250) || (brightness<10)) brightness = 71; // "111" on disp - eeprom info error
+	OCR0A = brightness;
+}
+
 
 void pcint_enable(void)
 {
