@@ -58,6 +58,7 @@ void timer1_stop(void);
 void clear_button_flags(void);
 void set_time(void);
 uint16_t secs_to_clock(uint16_t secs);
+void pcint_enable(void);
 
 
 
@@ -91,6 +92,7 @@ uint32_t text[1] = {
 uint16_t EEMEM e_beeper_speed_interval = 500;*/
 
 uint16_t EEMEM e_time = 150;
+uint8_t EEMEM e_brightness = 100;
 
 struct FLAG {
 	unsigned timeout : 1;
@@ -120,15 +122,6 @@ int main(void)
 
 	while (1)
 	{
-		// dimming
-		if ((PINB & (1<<ULEDS_P)) == (1<<ULEDS_P))
-		{
-			ULEDS_PORT &= ~(1<<ULEDS_P); // disable uleds
-			_delay_us(1500);
-			ULEDS_PORT |= (1<<ULEDS_P); // enable uleds
-			_delay_us(100);
-		}
-
 		if (flag.update)
 		{
 			flag.update = 0;
@@ -174,6 +167,8 @@ int main(void)
 				flag.state = STATE_CONF;
 				display_digit(secs_to_clock(time), 2);
 			}
+
+			pcint_enable();
 		}
 
 		if (flag.but_start)
@@ -191,14 +186,20 @@ int main(void)
 				flag.state = STATE_WORK;
 				ULEDS_PORT |= 1<<ULEDS_P; // enable uleds
 				timer1_start();
+
+				timer0_start();
 			}
 			if (flag.state == STATE_WORK)
 			{
 				ULEDS_PORT |= 1<<ULEDS_P; // enable uleds
 				timer1_start();
+
+				timer0_start();
 				LED_PORT &= ~(1<<LED_P);
 				flag.pause = 0;
 			}
+
+			pcint_enable();
 		}
 
 		if ((flag.state != STATE_IDLE) && (flag.but_pause))
@@ -226,10 +227,14 @@ int main(void)
 				{
 					flag.pause = 1;
 					timer1_stop();
+
+					timer0_stop();
 					LED_PORT |= (1<<LED_P);
 					ULEDS_PORT &= ~(1<<ULEDS_P); // disable uleds
 				}
 			}
+
+			pcint_enable();
 		}
 
 		// DELAY
@@ -248,14 +253,23 @@ void clear_button_flags(void)
 }
 
 
+ISR(TIMER0_COMPA_vect)
+{
+	ULEDS_PORT &= ~(1<<ULEDS_P); // disable uleds
+}
+
+
 ISR(TIMER0_OVF_vect)
 {
-	timer0_counter--;
+	ULEDS_PORT |= 1<<ULEDS_P; // enable uleds
+
+	/*timer0_counter--;
 	if (timer0_counter == 0)
 	{
 		timer0_stop();
 		GIMSK = 1<<PCIE; // Enable Pin Change Interrupts
 	}
+	*/
 }
 
 ISR(TIMER1_COMPA_vect)
@@ -269,7 +283,7 @@ ISR(TIMER1_COMPA_vect)
 ISR(PCINT_vect)
 {
 	GIMSK = 0<<PCIE; // Disable Pin Change Interrupts
-	timer0_start();
+	//timer0_start();
 	uint8_t cur_buttons = BUT_PIN;
 	if ((cur_buttons & (1<<BUT_START | 1<<BUT_PAUSE | 1<<BUT_CONF)) != (1<<BUT_START | 1<<BUT_PAUSE | 1<<BUT_CONF))
 	{
@@ -286,6 +300,10 @@ ISR(PCINT_vect)
 		{
 			flag.but_pause = 1;
 		}
+	}
+	else
+	{
+		GIMSK = 1<<PCIE; // Enable Pin Change Interrupts
 	}
 }
 
@@ -363,14 +381,15 @@ void display_digit(uint16_t digit, uint8_t dot)
 // TIMER0
 void timer0_init(void)
 {
-	TIMSK |= 1<<TOIE0; // output compare A match interrupt enable
+	TIMSK |= 1<<OCIE0A | 1<<TOIE0;
 	//TCCR0A = 1<<WGM11; // CTC mode
+	OCR0A = eeprom_read_byte(&e_brightness);
 	//TCNT0 = 0;
 }
 void timer0_start(void)
 {
-	timer0_counter = 2;
-	TCCR0B |= (1<<CS02 | 0<<CS01 | 1<<CS00); // prescaler = 1024
+	//timer0_counter = 2;
+	TCCR0B |= (0<<CS02 | 1<<CS01 | 0<<CS00);
 }
 void timer0_stop(void)
 {
@@ -409,4 +428,10 @@ void set_time(void)
 {
 	time = eeprom_read_word(&e_time);
 	if ((time>600) || (time<30)) time = 71; // "111" on disp - eeprom info error
+}
+
+void pcint_enable(void)
+{
+	_delay_ms(200);	
+	GIMSK = 1<<PCIE; // Enable Pin Change Interrupts
 }
