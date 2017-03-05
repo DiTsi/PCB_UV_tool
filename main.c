@@ -95,7 +95,7 @@ uint32_t text[1] = {
 /*uint16_t EEMEM e_speed_max = 5100;
 uint16_t EEMEM e_beeper_speed_interval = 500;*/
 
-uint16_t EEMEM e_time = 150;
+uint16_t EEMEM e_time = 30;
 uint8_t EEMEM e_brightness = 25;
 
 struct FLAG {
@@ -135,6 +135,7 @@ int main(void)
 			display_digit(secs_to_clock(time), 2);
 			if (flag.timeout)
 			{
+				timer0_stop();
 				flag.timeout = 0;
 				timer1_stop();
 				ULEDS_PORT &= ~(1<<ULEDS_P); // disable uleds
