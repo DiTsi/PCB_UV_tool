@@ -65,7 +65,6 @@ uint16_t secs_to_clock(uint16_t secs);
 void pcint_enable(void);
 
 
-
 // VARIABLES
 //
 uint8_t symbol[] = {
@@ -82,6 +81,7 @@ uint8_t symbol[] = {
 	0b00000000		// NONE
 };
 
+
 uint32_t text[1] = {
 	//0b100111001111110010011110100011100000000000000000, // DISP_COEF
 	//0b101101101100111010011110011110100001000001101110, // DISP_SPEd_H
@@ -92,11 +92,14 @@ uint32_t text[1] = {
 	0b101101101110111001111100	// DISP_SAV
 };
 
+
 /*uint16_t EEMEM e_speed_max = 5100;
 uint16_t EEMEM e_beeper_speed_interval = 500;*/
 
+
 uint16_t EEMEM e_time = 30;
 uint8_t EEMEM e_brightness = 25;
+
 
 struct FLAG {
 	unsigned timeout : 1;
@@ -107,7 +110,6 @@ struct FLAG {
 	unsigned but_conf : 1;
 	unsigned pause : 1;
 } flag;
-
 
 
 uint16_t time;
